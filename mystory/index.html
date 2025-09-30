@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Work – Rive</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #ff0000;
+      transition: background 300ms ease;
+    }
+    /* Rive background layer */
+    #canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      z-index: 0;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <script src="https://unpkg.com/@rive-app/webgl2"></script>
+  <script>
+    // ---------- Rive setup (kept) ----------
+    const canvas = document.getElementById("canvas");
+    let r, viewModelInstance;
+    let isActive = 0;
+
+    function addMQListener(mq, cb) {
+      if (mq.addEventListener) mq.addEventListener("change", cb);
+      else if (mq.addListener) mq.addListener(cb);
+    }
+
+    function updateBrowserDimensions() {
+      const browserWidth  = window.innerWidth  || document.documentElement.clientWidth  || document.body.clientWidth;
+      const browserHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+      if (viewModelInstance) {
+        try { viewModelInstance.number("artboardWidth").value  = browserWidth; } catch {}
+        try { viewModelInstance.number("artboardHeight").value = browserHeight; } catch {}
+      }
+      return { browserWidth, browserHeight };
+    }
+
+    let { browserWidth, browserHeight } = updateBrowserDimensions();
+
+    r = new rive.Rive({
+      src: "/assets/rive/casestudy_v01.riv",
+      canvas,
+      autoplay: true,
+      artboard: "home",            // exact
+      autoBind: true,
+      stateMachines: "mainAnim",   // exact
+      layout: new rive.Layout({ align: rive.Alignment.Center }),
+      onLoad: () => {
+        r.resizeDrawingSurfaceToCanvas();
+        viewModelInstance = r.viewModelInstance;
+
+        // Bind responsive numbers & isActive
+        try { viewModelInstance.number("artboardWidth").value  = browserWidth; } catch {}
+        try { viewModelInstance.number("artboardHeight").value = browserHeight; } catch {}
+        try { viewModelInstance.number("isActive").value = isActive; } catch {}
+
+        // Optional image input—ignore if not present
+        try { viewModelInstance.image("video").value = "./preyanPodcasting_03.png"; } catch {}
+
+        // Subscribe to Rive Events (General + OpenUrl)
+        const { EventType, RiveEventType } = rive;
+
+        function onRiveEventReceived(ev) {
+          const data = ev.data;
+
+          if (data.type === RiveEventType.General) {
+            // Debug hooks preserved
+            try {
+              console.log("Event name:", data.name);
+              console.log("Props:", data.properties);
+            } catch {}
+
+            // Former video navigation events now no-ops
+            if (data.name === "nxtPro") console.log("nxtPro triggered");
+            if (data.name === "prvPro") console.log("prvPro triggered");
+
+          } else if (data.type === RiveEventType.OpenUrl) {
+            // Same-tab navigation
+            window.location.href = data.url;
+          }
+        }
+
+        r.on(EventType.RiveEvent, onRiveEventReceived);
+
+        // Diagnostics
+        try {
+          console.log("[Rive] Loaded. Listening for Rive Events…");
+          console.log("Artboards:", r.artboardNames);
+          console.log("SM Inputs (mainAnim):", r.stateMachineInputs("mainAnim"));
+        } catch {}
+      },
+    });
+
+    // Keep canvas crisp & update model size
+    const resize = () => {
+      if (!r) return;
+      r.resizeDrawingSurfaceToCanvas();
+      ({ browserWidth, browserHeight } = updateBrowserDimensions());
+    };
+    window.addEventListener("resize", resize);
+    addMQListener(window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`), resize);
+  </script>
+</body>
+</html>

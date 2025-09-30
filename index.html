@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Preyan Mehta 2025</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    #canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <script src="https://unpkg.com/@rive-app/webgl2"></script>
+  <script>
+    const canvas = document.getElementById("canvas");
+    let r; // Rive instance
+    let viewModelInstance;
+
+    function addMQListener(mq, cb) {
+      if (mq.addEventListener) mq.addEventListener("change", cb);
+      else if (mq.addListener) mq.addListener(cb);
+    }
+
+    function updateBrowserDimensions() {
+      const browserWidth  = window.innerWidth  || document.documentElement.clientWidth  || document.body.clientWidth;
+      const browserHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+      if (viewModelInstance) {
+        viewModelInstance.number("artboardWidth").value  = browserWidth;
+        viewModelInstance.number("artboardHeight").value = browserHeight;
+      }
+      return { browserWidth, browserHeight };
+    }
+
+    let { browserWidth, browserHeight } = updateBrowserDimensions();
+
+    // ---- Rive init
+    r = new rive.Rive({
+      src: "/assets/rive/home_v01.1.riv",
+      canvas,
+      autoplay: true,
+      artboard: "home",          // exact name
+      autoBind: true,
+      stateMachines: "mainAnim", // exact name
+      layout: new rive.Layout({ align: rive.Alignment.Center }),
+
+      onLoad: () => {
+        r.resizeDrawingSurfaceToCanvas();
+        viewModelInstance = r.viewModelInstance;
+        viewModelInstance.number("artboardWidth").value  = browserWidth;
+        viewModelInstance.number("artboardHeight").value = browserHeight;
+
+        initScrollTrigger();
+        console.log("[Rive] Loaded. Listening for Rive Events…");
+
+        // Helpful one-time introspection to verify names:
+        console.log("Artboards:", r.artboardNames);
+        console.log("SM Inputs (mainAnim):", r.stateMachineInputs("mainAnim"));
+      },
+    });
+
+    // === Replace manual routing with official Rive Event listener ===
+    const { EventType, RiveEventType } = rive;
+
+    function onRiveEventReceived(riveEvent) {
+      const eventData = riveEvent.data;
+      const eventProperties = eventData.properties;
+      if (eventData.type === RiveEventType.General) {
+        console.log("Event name", eventData.name);
+        // Added relevant metadata from the event
+        console.log("Rating", eventProperties?.rating);
+        console.log("Message", eventProperties?.message);
+      } else if (eventData.type === RiveEventType.OpenUrl) {
+        console.log("Event name", eventData.name);
+        // window.open(eventData.url);
+        window.location.href = eventData.url;
+      }
+    }
+
+    // Add event listener and provide callback to handle Rive Event
+    r.on(EventType.RiveEvent, onRiveEventReceived);
+    // Can unsubscribe to Rive Events at any time via the off() API like below
+    // r.off(EventType.RiveEvent, onRiveEventReceived);
+
+    // Keep canvas crisp & update data model size
+    const resize = () => {
+      if (!r) return;
+      r.resizeDrawingSurfaceToCanvas();
+      ({ browserWidth, browserHeight } = updateBrowserDimensions());
+    };
+    window.addEventListener("resize", resize);
+    addMQListener(window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`), resize);
+
+    // ---- Scroll booleans (unchanged)
+    function initScrollTrigger() {
+      let isActive = false;
+      let timeout;
+      window.addEventListener(
+        "wheel",
+        (e) => {
+          const inputs = r.stateMachineInputs("mainAnim");
+          if (!inputs) return;
+
+          const downBool = inputs.find((i) => i.name === "isScrollingDn" && typeof i.value === "boolean");
+          const upBool   = inputs.find((i) => i.name === "isScrollingUp" && typeof i.value === "boolean");
+          if (!downBool || !upBool) return;
+
+          if (!isActive) {
+            isActive = true;
+            if (e.deltaY > 0) downBool.value = true;
+            else if (e.deltaY < 0) upBool.value = true;
+
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+              downBool.value = false;
+              upBool.value = false;
+              isActive = false;
+            }, 500);
+          }
+        },
+        { passive: true }
+      );
+    }
+  </script>
+</body>
+</html>
