@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -114,9 +114,23 @@
       try { console.log("[Gallery] showing", i, src); } catch { }
     }
 
+    function onRiveEventReceived(ev) {
+      const data = ev.data;
+      if (!data) return;
+
+      if (data.type === RiveEventType.General) {
+        try {
+          console.log('[Rive] Event', data.name, data.properties);
+        } catch {}
+      } else if (data.type === RiveEventType.OpenUrl && data.url) {
+        window.location.href = data.url;
+      }
+    }
+
     // ---- Rive + ViewModel binding ----
     const canvas = document.getElementById("canvas");
     let r, viewModelInstance;
+    const { EventType, RiveEventType } = rive;
 
     function addMQListener(mq, cb) { if (mq.addEventListener) mq.addEventListener("change", cb); else if (mq.addListener) mq.addListener(cb); }
 
@@ -149,6 +163,9 @@
 
         // Initial sync from slideNo
         startSlideSync();
+
+        // Listen for Rive events that carry URLs
+        r.on(EventType.RiveEvent, onRiveEventReceived);
         try {
           console.log("[Rive] Loaded. Using ViewModel numbers:", {
             has_slideNo: !!viewModelInstance.number("slideNo"),
