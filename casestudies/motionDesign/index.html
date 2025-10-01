@@ -1,28 +1,49 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Work Ã¢â‚¬â€œ Images over Rive</title>
+  <title>Work – Images over Rive</title>
   <style>
-    html,
-    body {
+    html, body {
       margin: 0;
       padding: 0;
       height: 100%;
       overflow: hidden;
       background: #000;
-      transition: background 300ms ease
+      transition: background 300ms ease;
     }
-
     #canvas {
       position: fixed;
       inset: 0;
       width: 100vw;
       height: 100vh;
       display: block;
-      z-index: 0
+      z-index: 0;
+    }
+    body.custom-cursor-enabled { cursor: none; }
+    body.custom-cursor-enabled.custom-cursor-pointer { cursor: pointer; }
+
+    #cursor-dot {
+      position: fixed;
+      top: 0; left: 0;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: #ff3030;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate3d(-50%, -50%, 0);
+      transition: transform 40ms linear, opacity 120ms ease-out, background 120ms ease-out;
+      z-index: 10;
+    }
+    #cursor-dot.cursor-dot-active {
+      transform: translate3d(-50%, -50%, 0) scale(0.8);
+      background: #ff1010;
+    }
+    body.custom-cursor-pointer #cursor-dot { opacity: 0; }
+
+    @media (pointer: coarse) {
+      body.custom-cursor-enabled { cursor: auto; }
     }
 
     .media-wrap {
@@ -33,21 +54,18 @@
       left: 3vw;
       display: grid;
       place-items: center;
-      z-index: 1
+      z-index: 1;
     }
-
     .stage {
       width: 100%;
       height: 100%;
       background: #000;
       border-radius: 12px;
-      /* box-shadow: 0 9px 30px rgba(255, 255, 255, .35); */
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden
+      overflow: hidden;
     }
-
     .stage img {
       max-width: 100%;
       max-height: 100%;
@@ -59,11 +77,10 @@
       opacity: 0;
       transition: opacity 200ms ease;
       background: #000;
-      display: block
+      display: block;
     }
   </style>
 </head>
-
 <body>
   <canvas id="canvas"></canvas>
 
@@ -100,13 +117,136 @@
     const preload = new Map();
     function ensurePreloaded(src) {
       if (preload.has(src)) return preload.get(src);
-      const img = new Image(); img.decoding = "async"; img.loading = "eager"; img.src = src;
-      preload.set(src, img); return img;
+      const img = new Image();
+      img.decoding = "async";
+      img.loading = "eager";
+      img.src = src;
+      preload.set(src, img);
+      return img;
     }
     images.forEach(ensurePreloaded);
 
+    // Cursor setup
+    const canvas = document.getElementById("canvas");
+    const supportsFinePointer = window.matchMedia("(pointer: fine)").matches;
+    const bodyEl = document.body;
+    let customCursorEl = null;
+    let isPointerCursor = false;
+
+    if (supportsFinePointer) {
+      bodyEl.classList.add("custom-cursor-enabled");
+      customCursorEl = document.createElement("div");
+      customCursorEl.id = "cursor-dot";
+      customCursorEl.setAttribute("aria-hidden", "true");
+      bodyEl.appendChild(customCursorEl);
+      canvas.style.cursor = "none";
+
+      const moveCursor = (event) => {
+        if (!customCursorEl) return;
+        customCursorEl.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0)`;
+        if (!isPointerCursor) customCursorEl.style.opacity = "1";
+      };
+
+      document.addEventListener("pointermove", moveCursor, { passive: true });
+      document.addEventListener("pointerdown", () => { customCursorEl?.classList.add("cursor-dot-active"); }, { passive: true });
+      document.addEventListener("pointerup", () => { customCursorEl?.classList.remove("cursor-dot-active"); }, { passive: true });
+      document.addEventListener("pointerleave", () => { if (customCursorEl) customCursorEl.style.opacity = "0"; }, { passive: true });
+    }
+
+    function setCustomCursorPointer(isPointer) {
+      const active = Boolean(isPointer);
+      if (supportsFinePointer) {
+        isPointerCursor = active;
+        bodyEl.classList.toggle("custom-cursor-pointer", active);
+        canvas.style.cursor = active ? "pointer" : "none";
+        if (customCursorEl) customCursorEl.style.opacity = active ? "0" : "1";
+      } else {
+        bodyEl.style.cursor = active ? "pointer" : "";
+      }
+    }
+
+    // Rive cursor intent helpers
+    const entryExitCursorEvents = new Map([
+      ["lkdent", true], ["lkdext", false],
+      ["rsment", true], ["rsmext", false],
+      ["cseent", true], ["cseext", false],
+      ["styent", true], ["styext", false],
+      ["hmeent", true], ["hmeext", false],
+    ]);
+    const normalizeEventName = (name) => (typeof name === "string" ? name.trim().toLowerCase() : "");
+    const hoverEventNames = new Set(["lkdhov", "rsmhov", "styhov", "csehov"]);
+    const hoverExitSignals = ["leave", "exit", "out", "idle", "default", "reset"];
+    const cursorPointerSignals = ["hover", "pointer", "hand", "enter", "over", "focus"];
+    const cursorDefaultSignals = ["leave", "exit", "out", "default", "reset", "idle"];
+
+    function handleNamedCursorEvent(eventData) {
+      const normalizedName = normalizeEventName(eventData.name);
+      const direct = entryExitCursorEvents.get(normalizedName);
+      if (typeof direct === "boolean") {
+        setCustomCursorPointer(direct);
+        return true;
+      }
+      if (!hoverEventNames.has(normalizedName)) return false;
+
+      const properties = eventData.properties || {};
+      const explicit = [
+        properties.hover, properties.isHover, properties.hovering, properties.isHovering,
+        properties.pointer, properties.isPointer,
+      ].find((v) => typeof v === "boolean");
+
+      if (typeof explicit === "boolean") {
+        setCustomCursorPointer(explicit);
+        return true;
+      }
+
+      const textCandidates = [
+        properties.state, properties.State,
+        properties.intent, properties.Intent,
+        properties.message, properties.Message,
+      ].filter((v) => typeof v === "string").map((v) => v.toLowerCase());
+
+      const isExitSignal = textCandidates.some((v) => hoverExitSignals.some((s) => v.includes(s)));
+      setCustomCursorPointer(!isExitSignal);
+      return true;
+    }
+
+    function normalizedMatches(candidates, signals) {
+      return candidates.some((value) => {
+        const normal = value.toLowerCase();
+        return signals.some((signal) => normal.includes(signal));
+      });
+    }
+
+    function resolveCursorIntent(eventData) {
+      if (handleNamedCursorEvent(eventData)) return;
+      const properties = eventData.properties || {};
+
+      const booleanHover = [
+        properties.hover, properties.isHover, properties.isHovering, properties.hovering,
+      ].find((v) => typeof v === "boolean");
+      if (typeof booleanHover === "boolean") {
+        setCustomCursorPointer(booleanHover);
+        return;
+      }
+
+      const candidates = [
+        properties.cursor, properties.Cursor,
+        properties.intent, properties.Intent,
+        properties.state, properties.State,
+        properties.message, properties.Message,
+        eventData.name,
+      ].filter((v) => typeof v === "string");
+
+      const normalizedName = normalizeEventName(eventData.name);
+      if (normalizedName) candidates.push(normalizedName);
+
+      if (normalizedMatches(candidates, cursorPointerSignals)) setCustomCursorPointer(true);
+      else if (normalizedMatches(candidates, cursorDefaultSignals)) setCustomCursorPointer(false);
+    }
+
+    // Image binding
     const imgEl = document.getElementById("galleryImage");
-    let currentIndex = -1; // force first render
+    let currentIndex = -1;
 
     async function setImageByIndex(i) {
       i = Math.max(0, Math.min(images.length - 1, i));
@@ -115,11 +255,11 @@
       const src = images[i];
       const pre = ensurePreloaded(src);
       imgEl.style.opacity = 0;
-      try { if (pre.decode) await pre.decode(); } catch (_) { }
+      try { if (pre.decode) await pre.decode(); } catch (_) {}
       imgEl.src = src;
       imgEl.alt = `project image ${i + 1} of ${images.length}`;
-      requestAnimationFrame(() => imgEl.style.opacity = 1);
-      try { console.log("[Gallery] showing", i, src); } catch { }
+      requestAnimationFrame(() => { imgEl.style.opacity = 1; });
+      try { console.log("[Gallery] showing", i, src); } catch {}
     }
 
     function onRiveEventReceived(ev) {
@@ -127,29 +267,29 @@
       if (!data) return;
 
       if (data.type === RiveEventType.General) {
-        try {
-          console.log('[Rive] Event', data.name, data.properties);
-        } catch {}
+        resolveCursorIntent(data);
+        try { console.log("[Rive] Event", data.name, data.properties); } catch {}
       } else if (data.type === RiveEventType.OpenUrl && data.url) {
+        setCustomCursorPointer(false);
         window.location.href = data.url;
       }
     }
 
     // ---- Rive + ViewModel binding ----
-    const canvas = document.getElementById("canvas");
     let r, viewModelInstance;
     const { EventType, RiveEventType } = rive;
 
-    function addMQListener(mq, cb) { if (mq.addEventListener) mq.addEventListener("change", cb); else if (mq.addListener) mq.addListener(cb); }
+    function addMQListener(mq, cb) {
+      if (mq.addEventListener) mq.addEventListener("change", cb);
+      else if (mq.addListener) mq.addListener(cb);
+    }
 
     function adjustSlide(delta) {
       const slideNo = viewModelInstance?.number("slideNo");
       if (!slideNo) return;
       const current = Number.isFinite(slideNo.value) ? slideNo.value : 1;
       const next = Math.max(1, Math.min(images.length, Math.round(current + delta)));
-      if (next !== slideNo.value) {
-        slideNo.value = next;
-      }
+      if (next !== slideNo.value) slideNo.value = next;
     }
 
     const SCROLL_DEBOUNCE_MS = 150;
@@ -170,8 +310,8 @@
       const w = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
       const h = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
       if (viewModelInstance) {
-        try { viewModelInstance.number("artboardWidth").value = w; } catch { }
-        try { viewModelInstance.number("artboardHeight").value = h; } catch { }
+        try { viewModelInstance.number("artboardWidth").value = w; } catch {}
+        try { viewModelInstance.number("artboardHeight").value = h; } catch {}
       }
       return { w, h };
     }
@@ -189,32 +329,28 @@
         r.resizeDrawingSurfaceToCanvas();
         viewModelInstance = r.viewModelInstance;
 
-        // Bind responsive numbers
-        try { viewModelInstance.number("artboardWidth").value = browserWidth; } catch { }
-        try { viewModelInstance.number("artboardHeight").value = browserHeight; } catch { }
+        try { viewModelInstance.number("artboardWidth").value = browserWidth; } catch {}
+        try { viewModelInstance.number("artboardHeight").value = browserHeight; } catch {}
 
-        // Initial sync from slideNo
         startSlideSync();
 
-        // Listen for Rive events that carry URLs
         r.on(EventType.RiveEvent, onRiveEventReceived);
 
         try {
           console.log("[Rive] Loaded. Using ViewModel numbers:", {
-            has_slideNo: !!viewModelInstance.number("slideNo"),
-            has_artboardWidth: !!viewModelInstance.number("artboardWidth"),
-            has_artboardHeight: !!viewModelInstance.number("artboardHeight"),
+            has_slideNo: !!viewModelInstance?.number("slideNo"),
+            has_artboardWidth: !!viewModelInstance?.number("artboardWidth"),
+            has_artboardHeight: !!viewModelInstance?.number("artboardHeight"),
           });
-        } catch { }
+        } catch {}
       },
     });
 
-    // Keep canvas crisp & update model size
-    const resize = () => {
+    function resize() {
       if (!r) return;
       r.resizeDrawingSurfaceToCanvas();
       ({ w: browserWidth, h: browserHeight } = updateBrowserDimensions());
-    };
+    }
     window.addEventListener("resize", resize);
     addMQListener(window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`), resize);
 
@@ -229,7 +365,6 @@
     function startSlideSync() {
       function tick() {
         const raw = readSlideNo();
-        // clamp to 1..images.length and round
         const clamped = Math.max(1, Math.min(images.length, Math.round(raw)));
         if (clamped !== lastSlideNo) {
           lastSlideNo = clamped;
@@ -237,13 +372,11 @@
         }
         requestAnimationFrame(tick);
       }
-      // show something immediately
       const init = Math.max(1, Math.min(images.length, Math.round(readSlideNo())));
-      lastSlideNo = null; // force update
+      lastSlideNo = null;
       setImageByIndex(init - 1);
       requestAnimationFrame(tick);
     }
   </script>
 </body>
-
 </html>

@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Work – Rive</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Work - Rive</title>
   <style>
     html, body {
       margin: 0;
@@ -13,7 +13,7 @@
       background: #ff0000;
       transition: background 300ms ease;
     }
-    /* Rive background layer */
+
     #canvas {
       position: fixed;
       inset: 0;
@@ -22,6 +22,44 @@
       display: block;
       z-index: 0;
     }
+
+    body.custom-cursor-enabled {
+      cursor: none;
+    }
+
+    body.custom-cursor-enabled.custom-cursor-pointer {
+      cursor: pointer;
+    }
+
+    #cursor-dot {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #000000;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate3d(-50%, -50%, 0);
+      transition: transform 40ms linear, opacity 120ms ease-out, background 120ms ease-out;
+      z-index: 10;
+    }
+
+    #cursor-dot.cursor-dot-active {
+      transform: translate3d(-50%, -50%, 0) scale(0.8);
+      background: #222222;
+    }
+
+    body.custom-cursor-pointer #cursor-dot {
+      opacity: 0;
+    }
+
+    @media (pointer: coarse) {
+      body.custom-cursor-enabled {
+        cursor: auto;
+      }
+    }
   </style>
 </head>
 <body>
@@ -29,10 +67,49 @@
 
   <script src="https://unpkg.com/@rive-app/webgl2"></script>
   <script>
-    // ---------- Rive setup (kept) ----------
     const canvas = document.getElementById("canvas");
-    let r, viewModelInstance;
+    let r;
+    let viewModelInstance;
     let isActive = 0;
+
+    const supportsFinePointer = window.matchMedia("(pointer: fine)").matches;
+    const bodyEl = document.body;
+    let customCursorEl = null;
+    let isPointerCursor = false;
+
+    if (supportsFinePointer) {
+      bodyEl.classList.add("custom-cursor-enabled");
+      customCursorEl = document.createElement("div");
+      customCursorEl.id = "cursor-dot";
+      customCursorEl.setAttribute("aria-hidden", "true");
+      bodyEl.appendChild(customCursorEl);
+      canvas.style.cursor = "none";
+
+      const moveCursor = (event) => {
+        if (!customCursorEl) return;
+        customCursorEl.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0)`;
+        if (!isPointerCursor) customCursorEl.style.opacity = "1";
+      };
+
+      document.addEventListener("pointermove", moveCursor, { passive: true });
+      document.addEventListener("pointerdown", () => { if (customCursorEl) customCursorEl.classList.add("cursor-dot-active"); }, { passive: true });
+      document.addEventListener("pointerup", () => { if (customCursorEl) customCursorEl.classList.remove("cursor-dot-active"); }, { passive: true });
+      document.addEventListener("pointerleave", () => {
+        if (customCursorEl) customCursorEl.style.opacity = "0";
+      });
+    }
+
+    const setCustomCursorPointer = (isPointer) => {
+      const active = Boolean(isPointer);
+      if (supportsFinePointer) {
+        isPointerCursor = active;
+        bodyEl.classList.toggle("custom-cursor-pointer", active);
+        if (canvas) canvas.style.cursor = active ? "pointer" : "none";
+        if (customCursorEl) customCursorEl.style.opacity = active ? "0" : "1";
+      } else {
+        bodyEl.style.cursor = active ? "pointer" : "";
+      }
+    };
 
     function addMQListener(mq, cb) {
       if (mq.addEventListener) mq.addEventListener("change", cb);
@@ -51,61 +128,167 @@
 
     let { browserWidth, browserHeight } = updateBrowserDimensions();
 
+    const entryExitCursorEvents = new Map([
+      ["lkdent", true],
+      ["lkdext", false],
+      ["rsment", true],
+      ["rsmext", false],
+      ["cseent", true],
+      ["cseext", false],
+      ["styent", true],
+      ["styext", false],
+      ["p1ent", true],
+      ["p1ext", false],
+      ["p2ent", true],
+      ["p2ext", false],
+      ["p3ent", true],
+      ["p3ext", false],
+    ]);
+
+    const normalizeEventName = (name) => (typeof name === "string" ? name.trim().toLowerCase() : "");
+
+    const hoverEventNames = new Set(["lkdhov", "rsmhov", "styhov", "csehov", "p1hov", "p2hov", "p3hov"]);
+    const hoverExitSignals = ["leave", "exit", "out", "idle", "default", "reset"];
+    const cursorPointerSignals = ["hover", "pointer", "hand", "enter", "over", "focus"];
+    const cursorDefaultSignals = ["leave", "exit", "out", "default", "reset", "idle"];
+
+    const handleNamedCursorEvent = (eventData) => {
+      const normalizedName = normalizeEventName(eventData.name);
+      const direct = entryExitCursorEvents.get(normalizedName);
+      if (typeof direct === "boolean") {
+        setCustomCursorPointer(direct);
+        return true;
+      }
+
+      if (!hoverEventNames.has(normalizedName)) return false;
+
+      const properties = eventData.properties || {};
+
+      const explicit = [
+        properties.hover,
+        properties.isHover,
+        properties.hovering,
+        properties.isHovering,
+        properties.pointer,
+        properties.isPointer,
+      ].find((value) => typeof value === "boolean");
+
+      if (typeof explicit === "boolean") {
+        setCustomCursorPointer(explicit);
+        return true;
+      }
+
+      const textCandidates = [
+        properties.state,
+        properties.State,
+        properties.intent,
+        properties.Intent,
+        properties.message,
+        properties.Message,
+      ]
+        .filter((value) => typeof value === "string")
+        .map((value) => value.toLowerCase());
+
+      const isExitSignal = textCandidates.some((value) =>
+        hoverExitSignals.some((signal) => value.includes(signal))
+      );
+
+      setCustomCursorPointer(!isExitSignal);
+      return true;
+    };
+
+    const normalizedMatches = (candidates, signals) =>
+      candidates.some((value) => {
+        const normal = value.toLowerCase();
+        return signals.some((signal) => normal.includes(signal));
+      });
+
+    const resolveCursorIntent = (eventData) => {
+      if (handleNamedCursorEvent(eventData)) return;
+
+      const properties = eventData.properties || {};
+
+      const booleanHover = [properties.hover, properties.isHover, properties.isHovering, properties.hovering]
+        .find((value) => typeof value === "boolean");
+      if (typeof booleanHover === "boolean") {
+        setCustomCursorPointer(booleanHover);
+        return;
+      }
+
+      const candidates = [
+        properties.cursor,
+        properties.Cursor,
+        properties.intent,
+        properties.Intent,
+        properties.state,
+        properties.State,
+        properties.message,
+        properties.Message,
+        eventData.name,
+      ].filter((value) => typeof value === "string");
+
+      const normalizedName = normalizeEventName(eventData.name);
+      if (normalizedName) candidates.push(normalizedName);
+
+      if (normalizedMatches(candidates, cursorPointerSignals)) {
+        setCustomCursorPointer(true);
+      } else if (normalizedMatches(candidates, cursorDefaultSignals)) {
+        setCustomCursorPointer(false);
+      }
+    };
+
+    function initEventBridge() {
+      const { EventType, RiveEventType } = rive;
+
+      function onRiveEventReceived(ev) {
+        const data = ev.data;
+
+        if (data.type === RiveEventType.General) {
+          resolveCursorIntent(data);
+          try {
+            console.log("Event name:", data.name);
+            console.log("Props:", data.properties);
+          } catch {}
+
+          if (data.name === "nxtPro") console.log("nxtPro triggered");
+          if (data.name === "prvPro") console.log("prvPro triggered");
+
+        } else if (data.type === RiveEventType.OpenUrl) {
+          setCustomCursorPointer(false);
+          window.location.href = data.url;
+        }
+      }
+
+      r.on(EventType.RiveEvent, onRiveEventReceived);
+    }
+
     r = new rive.Rive({
       src: "/assets/rive/casestudy_v01.riv",
       canvas,
       autoplay: true,
-      artboard: "home",            // exact
+      artboard: "home",
       autoBind: true,
-      stateMachines: "mainAnim",   // exact
+      stateMachines: "mainAnim",
       layout: new rive.Layout({ align: rive.Alignment.Center }),
       onLoad: () => {
         r.resizeDrawingSurfaceToCanvas();
         viewModelInstance = r.viewModelInstance;
 
-        // Bind responsive numbers & isActive
         try { viewModelInstance.number("artboardWidth").value  = browserWidth; } catch {}
         try { viewModelInstance.number("artboardHeight").value = browserHeight; } catch {}
         try { viewModelInstance.number("isActive").value = isActive; } catch {}
-
-        // Optional image input—ignore if not present
         try { viewModelInstance.image("video").value = "./preyanPodcasting_03.png"; } catch {}
 
-        // Subscribe to Rive Events (General + OpenUrl)
-        const { EventType, RiveEventType } = rive;
+        initEventBridge();
 
-        function onRiveEventReceived(ev) {
-          const data = ev.data;
-
-          if (data.type === RiveEventType.General) {
-            // Debug hooks preserved
-            try {
-              console.log("Event name:", data.name);
-              console.log("Props:", data.properties);
-            } catch {}
-
-            // Former video navigation events now no-ops
-            if (data.name === "nxtPro") console.log("nxtPro triggered");
-            if (data.name === "prvPro") console.log("prvPro triggered");
-
-          } else if (data.type === RiveEventType.OpenUrl) {
-            // Same-tab navigation
-            window.location.href = data.url;
-          }
-        }
-
-        r.on(EventType.RiveEvent, onRiveEventReceived);
-
-        // Diagnostics
         try {
-          console.log("[Rive] Loaded. Listening for Rive Events…");
+          console.log("[Rive] Loaded. Listening for Rive Events.");
           console.log("Artboards:", r.artboardNames);
           console.log("SM Inputs (mainAnim):", r.stateMachineInputs("mainAnim"));
         } catch {}
       },
     });
 
-    // Keep canvas crisp & update model size
     const resize = () => {
       if (!r) return;
       r.resizeDrawingSurfaceToCanvas();
@@ -116,3 +299,4 @@
   </script>
 </body>
 </html>
+

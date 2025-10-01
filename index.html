@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -16,7 +16,26 @@
       display: block;
       width: 100vw;
       height: 100vh;
+      z-index: 0;
     }
+
+    /* Custom cursor */
+    body.custom-cursor-enabled { cursor: none; }
+    body.custom-cursor-enabled.custom-cursor-pointer { cursor: pointer; }
+    #cursor-dot{
+      position: fixed; top:0; left:0;
+      width:12px; height:12px; border-radius:50%;
+      background:#ff3030; pointer-events:none; opacity:0;
+      transform: translate3d(-50%,-50%,0);
+      transition: transform 40ms linear, opacity 120ms ease-out, background 120ms ease-out;
+      z-index:10;
+    }
+    #cursor-dot.cursor-dot-active{
+      transform: translate3d(-50%,-50%,0) scale(0.8);
+      background:#ff1010;
+    }
+    body.custom-cursor-pointer #cursor-dot{ opacity:0; }
+    @media (pointer: coarse){ body.custom-cursor-enabled { cursor:auto; } }
   </style>
 </head>
 <body>
@@ -28,72 +47,153 @@
     let r; // Rive instance
     let viewModelInstance;
 
+    /* ---------- Custom cursor: setup ---------- */
+    const supportsFinePointer = window.matchMedia("(pointer: fine)").matches;
+    const bodyEl = document.body;
+    let customCursorEl = null;
+    let isPointerCursor = false;
+
+    if (supportsFinePointer) {
+      bodyEl.classList.add("custom-cursor-enabled");
+      customCursorEl = document.createElement("div");
+      customCursorEl.id = "cursor-dot";
+      customCursorEl.setAttribute("aria-hidden", "true");
+      bodyEl.appendChild(customCursorEl);
+      canvas.style.cursor = "none";
+
+      const moveCursor = (event) => {
+        if (!customCursorEl) return;
+        customCursorEl.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0)`;
+        if (!isPointerCursor) customCursorEl.style.opacity = "1";
+      };
+      document.addEventListener("pointermove", moveCursor, { passive: true });
+      document.addEventListener("pointerdown", () => { customCursorEl?.classList.add("cursor-dot-active"); }, { passive: true });
+      document.addEventListener("pointerup",   () => { customCursorEl?.classList.remove("cursor-dot-active"); }, { passive: true });
+      document.addEventListener("pointerleave",() => { if (customCursorEl) customCursorEl.style.opacity = "0"; }, { passive: true });
+    }
+
+    function setCustomCursorPointer(isPointer){
+      const active = Boolean(isPointer);
+      if (supportsFinePointer) {
+        isPointerCursor = active;
+        bodyEl.classList.toggle("custom-cursor-pointer", active);
+        canvas.style.cursor = active ? "pointer" : "none";
+        if (customCursorEl) customCursorEl.style.opacity = active ? "0" : "1";
+      } else {
+        bodyEl.style.cursor = active ? "pointer" : "";
+      }
+    }
+
+    /* ---------- Cursor intent from Rive events ---------- */
+    const entryExitCursorEvents = new Map([
+      ["lkdent", true], ["lkdext", false],
+      ["rsment", true], ["rsmext", false],
+      ["cseent", true], ["cseext", false],
+      ["styent", true], ["styext", false],
+    ]);
+    const normalizeEventName = (name) => (typeof name === "string" ? name.trim().toLowerCase() : "");
+    const hoverEventNames = new Set(["lkdhov", "rsmhov", "styhov", "csehov"]);
+    const hoverExitSignals = ["leave","exit","out","idle","default","reset"];
+    const cursorPointerSignals = ["hover","pointer","hand","enter","over","focus"];
+    const cursorDefaultSignals = ["leave","exit","out","default","reset","idle"];
+
+    function handleNamedCursorEvent(eventData){
+      const normalizedName = normalizeEventName(eventData.name);
+      const direct = entryExitCursorEvents.get(normalizedName);
+      if (typeof direct === "boolean") { setCustomCursorPointer(direct); return true; }
+      if (!hoverEventNames.has(normalizedName)) return false;
+
+      const properties = eventData.properties || {};
+      const explicit = [
+        properties.hover, properties.isHover, properties.hovering, properties.isHovering,
+        properties.pointer, properties.isPointer,
+      ].find(v => typeof v === "boolean");
+      if (typeof explicit === "boolean"){ setCustomCursorPointer(explicit); return true; }
+
+      const textCandidates = [
+        properties.state, properties.State,
+        properties.intent, properties.Intent,
+        properties.message, properties.Message,
+      ].filter(v => typeof v === "string").map(v => v.toLowerCase());
+      const isExit = textCandidates.some(v => hoverExitSignals.some(s => v.includes(s)));
+      setCustomCursorPointer(!isExit);
+      return true;
+    }
+    function normalizedMatches(candidates, signals){
+      return candidates.some(v => signals.some(s => String(v).toLowerCase().includes(s)));
+    }
+    function resolveCursorIntent(eventData){
+      if (handleNamedCursorEvent(eventData)) return;
+      const p = eventData.properties || {};
+      const boolHover = [p.hover, p.isHover, p.isHovering, p.hovering].find(v => typeof v === "boolean");
+      if (typeof boolHover === "boolean"){ setCustomCursorPointer(boolHover); return; }
+
+      const candidates = [
+        p.cursor, p.Cursor, p.intent, p.Intent, p.state, p.State, p.message, p.Message, eventData.name,
+      ].filter(v => typeof v === "string");
+      const normalizedName = normalizeEventName(eventData.name);
+      if (normalizedName) candidates.push(normalizedName);
+
+      if (normalizedMatches(candidates, cursorPointerSignals)) setCustomCursorPointer(true);
+      else if (normalizedMatches(candidates, cursorDefaultSignals)) setCustomCursorPointer(false);
+    }
+
+    /* ---------- Helpers ---------- */
     function addMQListener(mq, cb) {
       if (mq.addEventListener) mq.addEventListener("change", cb);
       else if (mq.addListener) mq.addListener(cb);
     }
-
     function updateBrowserDimensions() {
       const browserWidth  = window.innerWidth  || document.documentElement.clientWidth  || document.body.clientWidth;
       const browserHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
       if (viewModelInstance) {
-        viewModelInstance.number("artboardWidth").value  = browserWidth;
-        viewModelInstance.number("artboardHeight").value = browserHeight;
+        try { viewModelInstance.number("artboardWidth").value  = browserWidth; } catch {}
+        try { viewModelInstance.number("artboardHeight").value = browserHeight; } catch {}
       }
       return { browserWidth, browserHeight };
     }
-
     let { browserWidth, browserHeight } = updateBrowserDimensions();
 
-    // ---- Rive init
+    /* ---------- Rive init ---------- */
     r = new rive.Rive({
       src: "/assets/rive/home_v01.riv",
       canvas,
       autoplay: true,
-      artboard: "home",          // exact name
+      artboard: "home",
       autoBind: true,
-      stateMachines: "mainAnim", // exact name
+      stateMachines: "mainAnim",
       layout: new rive.Layout({ align: rive.Alignment.Center }),
-
       onLoad: () => {
         r.resizeDrawingSurfaceToCanvas();
         viewModelInstance = r.viewModelInstance;
-        viewModelInstance.number("artboardWidth").value  = browserWidth;
-        viewModelInstance.number("artboardHeight").value = browserHeight;
+        try { viewModelInstance.number("artboardWidth").value  = browserWidth; } catch {}
+        try { viewModelInstance.number("artboardHeight").value = browserHeight; } catch {}
 
         initScrollTrigger();
-        console.log("[Rive] Loaded. Listening for Rive Events…");
 
-        // Helpful one-time introspection to verify names:
+        // Rive events
+        const { EventType, RiveEventType } = rive;
+        function onRiveEventReceived(rev){
+          const data = rev.data;
+          if (!data) return;
+
+          if (data.type === RiveEventType.General){
+            resolveCursorIntent(data);
+            try { console.log("[Rive] Event", data.name, data.properties); } catch {}
+          } else if (data.type === RiveEventType.OpenUrl && data.url){
+            setCustomCursorPointer(false);
+            window.location.href = data.url;
+          }
+        }
+        r.on(EventType.RiveEvent, onRiveEventReceived);
+
+        console.log("[Rive] Loaded.");
         console.log("Artboards:", r.artboardNames);
         console.log("SM Inputs (mainAnim):", r.stateMachineInputs("mainAnim"));
       },
     });
 
-    // === Replace manual routing with official Rive Event listener ===
-    const { EventType, RiveEventType } = rive;
-
-    function onRiveEventReceived(riveEvent) {
-      const eventData = riveEvent.data;
-      const eventProperties = eventData.properties;
-      if (eventData.type === RiveEventType.General) {
-        console.log("Event name", eventData.name);
-        // Added relevant metadata from the event
-        console.log("Rating", eventProperties?.rating);
-        console.log("Message", eventProperties?.message);
-      } else if (eventData.type === RiveEventType.OpenUrl) {
-        console.log("Event name", eventData.name);
-        // window.open(eventData.url);
-        window.location.href = eventData.url;
-      }
-    }
-
-    // Add event listener and provide callback to handle Rive Event
-    r.on(EventType.RiveEvent, onRiveEventReceived);
-    // Can unsubscribe to Rive Events at any time via the off() API like below
-    // r.off(EventType.RiveEvent, onRiveEventReceived);
-
-    // Keep canvas crisp & update data model size
+    /* ---------- Resize ---------- */
     const resize = () => {
       if (!r) return;
       r.resizeDrawingSurfaceToCanvas();
@@ -102,7 +202,7 @@
     window.addEventListener("resize", resize);
     addMQListener(window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`), resize);
 
-    // ---- Scroll booleans (unchanged)
+    /* ---------- Scroll booleans (unchanged) ---------- */
     function initScrollTrigger() {
       let isActive = false;
       let timeout;
