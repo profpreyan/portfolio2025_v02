@@ -142,6 +142,30 @@
 
     function addMQListener(mq, cb) { if (mq.addEventListener) mq.addEventListener("change", cb); else if (mq.addListener) mq.addListener(cb); }
 
+    function adjustSlide(delta) {
+      const slideNo = viewModelInstance?.number("slideNo");
+      if (!slideNo) return;
+      const current = Number.isFinite(slideNo.value) ? slideNo.value : 1;
+      const next = Math.max(1, Math.min(images.length, Math.round(current + delta)));
+      if (next !== slideNo.value) {
+        slideNo.value = next;
+      }
+    }
+
+    const SCROLL_DEBOUNCE_MS = 150;
+    let lastScrollAt = 0;
+    function handleWheel(evt) {
+      if (!viewModelInstance) return;
+      const direction = evt.deltaY !== 0 ? Math.sign(evt.deltaY) : Math.sign(evt.deltaX);
+      if (!direction) return;
+      const now = Date.now();
+      if (now - lastScrollAt < SCROLL_DEBOUNCE_MS) return;
+      if (evt.cancelable) evt.preventDefault();
+      adjustSlide(direction);
+      lastScrollAt = now;
+    }
+    window.addEventListener("wheel", handleWheel, { passive: false });
+
     function updateBrowserDimensions() {
       const w = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
       const h = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
